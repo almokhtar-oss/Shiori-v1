@@ -56,11 +56,19 @@ export default function Assignments() {
     const todayStr = now.toDateString()
     const weekEnd = new Date(now); weekEnd.setDate(weekEnd.getDate() + 7)
     return (assignments || []).filter(a => {
-      if (filter === 'today') return new Date(a.dueDate).toDateString() === todayStr && !a.completed
-      if (filter === 'week') return new Date(a.dueDate) <= weekEnd && !a.completed
-      if (filter === 'overdue') return new Date(a.dueDate) < now && !a.completed
+      // Classroom coursework without a deadline has dueDate === null — never
+      // treat that as "due" for the date-based tabs (it isn't due Jan 1 1970).
+      if (filter === 'today') return a.dueDate && new Date(a.dueDate).toDateString() === todayStr && !a.completed
+      if (filter === 'week') return a.dueDate && new Date(a.dueDate) <= weekEnd && !a.completed
+      if (filter === 'overdue') return a.dueDate && new Date(a.dueDate) < now && !a.completed
       return true
-    }).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+    }).sort((a, b) => {
+      // No-due-date items sort after everything with a real date, not first.
+      if (!a.dueDate && !b.dueDate) return 0
+      if (!a.dueDate) return 1
+      if (!b.dueDate) return -1
+      return new Date(a.dueDate) - new Date(b.dueDate)
+    })
   }, [assignments, filter])
 
   const handleAdd = () => {
@@ -145,8 +153,8 @@ export default function Assignments() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filtered.map(a => {
-            const due = new Date(a.dueDate)
-            const overdue = due < new Date() && !a.completed
+            const due = a.dueDate ? new Date(a.dueDate) : null
+            const overdue = !!due && due < new Date() && !a.completed
             const pColor = PRIORITY_COLOR[a.priority] || C.textMuted
             return (
               <div key={a.id} className="hover-lift" style={{
@@ -167,7 +175,7 @@ export default function Assignments() {
                     textDecoration: a.completed ? 'line-through' : 'none',
                   }}>{a.title}</div>
                   <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    {a.course || a.courseName} · Due {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {a.course || a.courseName} · {due ? `Due ${due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'No due date'}
                     {overdue && <span style={{ color: C.pink, fontWeight: 700 }}>Overdue</span>}
                     {a.link && (
                       <a href={a.link} target="_blank" rel="noopener noreferrer"
