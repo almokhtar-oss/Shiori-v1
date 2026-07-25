@@ -6,6 +6,9 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom', 'react-router-dom'],
   },
+  optimizeDeps: {
+    exclude: ['@mlc-ai/web-llm'],
+  },
   server: {
     port: 5173,
     proxy: {

@@ -1,13 +1,13 @@
 import { useState, useRef } from 'react'
 import { Upload, FileText, Sparkles, Check, AlertTriangle } from 'lucide-react'
-import { useAssignmentsStore, useUIStore } from '../stores'
+import { useAssignmentsStore } from '../stores'
 import { C, fonts, tint, btnPrimary, chip } from '../utils/theme'
 import { PageHeader, Card } from '../components/ui'
-import { callGeminiClient } from '../utils/gemini'
+import { generateAI, aiAvailable, aiModeLabel } from '../utils/ai'
+import { hasClientKey } from '../utils/gemini'
 
 export default function SyllabusImport() {
   const { addAssignment } = useAssignmentsStore()
-  const { geminiApiKey } = useUIStore()
   const [text, setText] = useState('')
   const [extracted, setExtracted] = useState([])
   const [loading, setLoading] = useState(false)
@@ -25,12 +25,12 @@ export default function SyllabusImport() {
   const extract = async () => {
     if (!text.trim()) return
     setLoading(true)
-    if (!geminiApiKey) {
+    if (!aiAvailable()) {
       setTimeout(() => { setExtracted(DEMO_EXTRACTED); setLoading(false) }, 700)
       return
     }
     try {
-      const raw = await callGeminiClient(
+      const raw = await generateAI(
         `Extract all assignments and due dates from this syllabus. Return ONLY a JSON array, no markdown: [{"title":"...","dueDate":"YYYY-MM-DD","course":"...","priority":"low|medium|high"}]\n\n${text}`
       ) || ''
       const match = raw.match(/\[[\s\S]*\]/)
@@ -64,14 +64,24 @@ export default function SyllabusImport() {
         subtitle="Upload or paste your syllabus — Shiori extracts the assignments automatically"
       />
 
-      {!geminiApiKey && (
+      {!aiAvailable() && (
         <div style={{
           display: 'flex', gap: 10, alignItems: 'flex-start',
           background: tint(C.orange, 0.08), border: `1px solid ${tint(C.orange, 0.3)}`,
           borderRadius: 12, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: C.orange,
         }}>
           <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-          No Gemini key — a sample extraction will be shown. Add your free key in Settings for real AI extraction.
+          This browser can't run on-device AI (needs WebGPU) — a sample extraction will be shown. Add a free Gemini key in Settings, or use a WebGPU browser like Chrome.
+        </div>
+      )}
+      {aiAvailable() && !hasClientKey() && (
+        <div style={{
+          display: 'flex', gap: 10, alignItems: 'flex-start',
+          background: tint(C.blue, 0.06), border: `1px solid ${tint(C.blue, 0.25)}`,
+          borderRadius: 12, padding: '10px 14px', marginBottom: 20, fontSize: 12, color: C.blue,
+        }}>
+          <Sparkles size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+          Using free on-device AI ({aiModeLabel()}) — first run downloads a small model, then works fully offline.
         </div>
       )}
 

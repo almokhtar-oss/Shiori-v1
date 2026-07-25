@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Settings as SettingsIcon, RefreshCw, Eye, EyeOff, Check, LogOut, Trash2, ExternalLink } from 'lucide-react'
+import { Settings as SettingsIcon, RefreshCw, Eye, EyeOff, Check, LogOut, Trash2, ExternalLink, Cpu, Download } from 'lucide-react'
 import { useAuthStore, useUIStore, useAssignmentsStore } from '../stores'
 import { C, fonts, tint, inputStyle, btnPrimary, btnGhost } from '../utils/theme'
 import { PageHeader, Card } from '../components/ui'
 import { GoogleLogo } from '../components/GoogleButton'
+import { preloadLocalAI, isLocalAISupported, useLocalAIStore } from '../utils/localAI'
 
 function Section({ title, children }) {
   return (
@@ -35,6 +36,10 @@ export default function Settings() {
   const [keyInput, setKeyInput] = useState(geminiApiKey || '')
   const [keySaved, setKeySaved] = useState(false)
   const [showKey, setShowKey] = useState(false)
+  const localAIStatus = useLocalAIStore(s => s.status)
+  const localAIProgress = useLocalAIStore(s => s.progress)
+  const localAIError = useLocalAIStore(s => s.error)
+  const localAISupported = isLocalAISupported()
 
   const connected = isGoogleConnected()
 
@@ -139,14 +144,56 @@ export default function Settings() {
         </div>
       </Section>
 
+      {/* On-device AI */}
+      <Section title="AI — no API key needed">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginBottom: 14 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 12, background: tint(C.purple, 0.12),
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.purple, flexShrink: 0,
+          }}><Cpu size={20} /></div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>On-device AI model</div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
+              {!localAISupported
+                ? "This browser doesn't support WebGPU — use Chrome or Edge to run AI fully offline with no key."
+                : localAIStatus === 'ready'
+                  ? 'Downloaded and cached in this browser. Runs 100% offline.'
+                  : localAIStatus === 'loading'
+                    ? `Downloading… ${Math.round(localAIProgress * 100)}% (one-time, then cached)`
+                    : localAIStatus === 'error'
+                      ? (localAIError || 'Failed to load — try again')
+                      : 'Runs quiz, study plan, flashcard and chat AI right in your browser — nothing uploaded, no key required.'}
+            </div>
+          </div>
+          <span style={{
+            padding: '4px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+            fontFamily: fonts.heading, flexShrink: 0,
+            color: localAIStatus === 'ready' ? C.green : localAIStatus === 'error' ? C.pink : C.textMuted,
+            background: localAIStatus === 'ready' ? tint(C.greenDark, 0.1) : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${localAIStatus === 'ready' ? tint(C.greenDark, 0.4) : C.border}`,
+          }}>
+            {localAIStatus === 'ready' ? '● Ready' : localAIStatus === 'loading' ? '○ Downloading' : localAIStatus === 'error' ? '● Error' : '○ Not loaded'}
+          </span>
+        </div>
+        {localAISupported && localAIStatus !== 'ready' && (
+          <button
+            onClick={() => { preloadLocalAI(); addToast({ type: 'info', message: 'Downloading on-device AI model…' }) }}
+            disabled={localAIStatus === 'loading'}
+            style={{ ...btnPrimary, cursor: localAIStatus === 'loading' ? 'not-allowed' : 'pointer', opacity: localAIStatus === 'loading' ? 0.7 : 1 }}
+          >
+            <Download size={14} /> {localAIStatus === 'loading' ? 'Downloading…' : 'Download now'}
+          </button>
+        )}
+      </Section>
+
       {/* API Keys */}
-      <Section title="API Keys">
+      <Section title="API Keys (optional)">
         <div style={{ marginBottom: 8 }}>
           <label style={{ display: 'block', fontSize: 13, color: C.text, marginBottom: 8, fontWeight: 700 }}>
             Gemini API Key
           </label>
           <p style={{ fontSize: 12, color: C.textMuted, marginBottom: 10, lineHeight: 1.6 }}>
-            Powers AI features (flashcard generation, quiz, study plans). Stored only on this device.{' '}
+            Optional — Shiori works without one via the on-device AI above. Adding a key gives faster, higher-quality answers. Stored only on this device.{' '}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: C.blue, textDecoration: 'none' }}>
               Get a free key <ExternalLink size={10} style={{ display: 'inline', verticalAlign: '-1px' }} />
             </a>

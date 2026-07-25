@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Send, X, Sparkles, Zap } from 'lucide-react'
-import { callGeminiClient, hasClientKey } from '../utils/gemini'
+import { generateAI, aiAvailable } from '../utils/ai'
+import { preloadLocalAI, useLocalAIStore } from '../utils/localAI'
+import { hasClientKey } from '../utils/gemini'
 import { useAuthStore, useAssignmentsStore } from '../stores'
 
 const QUICK_PROMPTS = [
@@ -75,6 +77,8 @@ const getLocalResponse = (message, assignments) => {
 const AIChat = ({ onClose }) => {
   const { user } = useAuthStore()
   const { assignments } = useAssignmentsStore()
+  const localAIStatus = useLocalAIStore(s => s.status)
+  const localAIProgress = useLocalAIStore(s => s.progress)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -99,6 +103,12 @@ const AIChat = ({ onClose }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    // Warm up the on-device model in the background as soon as chat opens,
+    // so the first real question doesn't eat the download wait.
+    if (!user?.isDemo && !hasClientKey()) preloadLocalAI()
+  }, [user])
+
   const addMessage = (role, content) => ({
     id: Date.now() + Math.random(),
     role,
@@ -115,21 +125,21 @@ const AIChat = ({ onClose }) => {
     setInput('')
 
     try {
-      if (!user?.isDemo && hasClientKey()) {
-        // Real Gemini answer, grounded in the user's actual assignments.
+      if (!user?.isDemo && aiAvailable()) {
+        // Real AI answer (Gemini, or the on-device model), grounded in the user's actual assignments.
         const pending = assignments.filter(a => a.status !== 'graded')
         const list = pending.slice(0, 20).map(a =>
           `- ${a.title}${a.courseName ? ` (${a.courseName})` : ''}${a.dueDate ? ` due ${new Date(a.dueDate).toLocaleDateString()}` : ''}${a.priority ? ` [${a.priority}]` : ''}`
         ).join('\n') || '(no pending assignments)'
         const prompt = `You are Shiori, a friendly, concise AI study companion for a student. Use their data to answer.\n\nPending assignments:\n${list}\n\nStudent question: ${msgText}\n\nAnswer in 1-4 short sentences. Be specific and practical.`
-        const reply = await callGeminiClient(prompt, { maxOutputTokens: 512 })
+        const reply = await generateAI(prompt, { maxOutputTokens: 512 })
         setMessages(prev => [...prev, addMessage('assistant', reply || getLocalResponse(msgText, assignments))])
       } else {
-        // No API key (or demo) — local heuristic responder over real data. No key needed.
+        // No AI available (or demo) — local heuristic responder over real data.
         await new Promise(r => setTimeout(r, 500 + Math.random() * 600))
         const reply = getLocalResponse(msgText, assignments)
-        const suffix = !user?.isDemo && !hasClientKey()
-          ? '\n\n_Tip: add a free Gemini API key in Settings for smarter, free-form answers._'
+        const suffix = !user?.isDemo && !aiAvailable()
+          ? '\n\n_Tip: this browser can\'t run on-device AI — use Chrome/Edge for free offline AI, or add a Gemini key in Settings._'
           : ''
         setMessages(prev => [...prev, addMessage('assistant', reply + suffix)])
       }
@@ -166,7 +176,12 @@ const AIChat = ({ onClose }) => {
               Shiori AI
             </p>
             <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: '0.7rem', color: '#606080' }}>
-              {user?.isDemo ? 'Demo Mode — offline AI' : (hasClientKey() ? 'Powered by Gemini' : 'Smart offline mode')}
+              {user?.isDemo ? 'Demo Mode — offline AI' : (
+                hasClientKey() ? 'Powered by Gemini' :
+                localAIStatus === 'loading' ? `Downloading on-device model… ${Math.round(localAIProgress * 100)}%` :
+                localAIStatus === 'ready' ? 'Powered by on-device AI (offline)' :
+                aiAvailable() ? 'On-device AI' : 'Smart offline mode'
+              )}
             </p>
           </div>
         </div>

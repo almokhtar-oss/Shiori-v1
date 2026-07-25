@@ -121,6 +121,20 @@ create table if not exists public.study_plans (
   created_at   timestamptz default now()
 );
 
+-- ── Profiles (real leaderboard) ─────────────────────────────────────────────
+-- Public-readable so friends can see each other's XP/streak by share code;
+-- writable only by the owning user (see RLS below).
+create table if not exists public.profiles (
+  user_id     uuid primary key references auth.users(id) on delete cascade,
+  name        text not null default 'Student',
+  share_code  text unique not null,
+  xp          integer default 0,
+  level       integer default 1,
+  streak      integer default 0,
+  friend_ids  jsonb default '[]'::jsonb,
+  updated_at  timestamptz default now()
+);
+
 -- ── New columns for installs created before 'source' / 'updated_at' existed ─
 alter table public.courses     add column if not exists source     text;
 alter table public.assignments add column if not exists source     text;
@@ -155,6 +169,7 @@ create index if not exists idx_flashcards_user      on public.flashcards(user_id
 create index if not exists idx_events_user          on public.events(user_id);
 create index if not exists idx_habits_user          on public.habits(user_id);
 create index if not exists idx_study_plans_user     on public.study_plans(user_id);
+create index if not exists idx_profiles_share_code  on public.profiles(share_code);
 
 -- ============================================================================
 -- Row Level Security — reset policies so each user can only touch their rows.
@@ -181,3 +196,16 @@ begin
          with check (auth.uid() = user_id);', t);
   end loop;
 end $$;
+
+-- Profiles: anyone signed in can read (needed so a share code resolves to a
+-- name/XP for the friend who entered it), but you can only write your own row.
+alter table public.profiles enable row level security;
+drop policy if exists "profiles are publicly readable" on public.profiles;
+create policy "profiles are publicly readable" on public.profiles
+  for select using (true);
+drop policy if exists "profiles: own row writable" on public.profiles;
+create policy "profiles: own row writable" on public.profiles
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "profiles: own row updatable" on public.profiles;
+create policy "profiles: own row updatable" on public.profiles
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);

@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Puzzle, X, Trophy, ThumbsUp, BookOpen, Sparkles, AlertTriangle } from 'lucide-react'
-import { useNotesStore, useUIStore } from '../stores'
+import { useNotesStore } from '../stores'
 import { C, fonts, tint, inputStyle, btnPrimary, btnGhost } from '../utils/theme'
 import { PageHeader, Card } from '../components/ui'
-import { callGeminiClient } from '../utils/gemini'
+import { generateAI, aiAvailable, aiModeLabel } from '../utils/ai'
+import { hasClientKey } from '../utils/gemini'
 
 const DEMO_QUIZ = [
   { q: 'What is photosynthesis?', opts: ['Making food from sunlight', 'Breaking down glucose', 'Cell division', 'DNA replication'], ans: 0 },
@@ -13,7 +14,6 @@ const DEMO_QUIZ = [
 
 export default function Quiz() {
   const { notes } = useNotesStore()
-  const { geminiApiKey } = useUIStore()
   const [phase, setPhase] = useState('setup') // setup | quiz | results
   const [questions, setQuestions] = useState([])
   const [current, setCurrent] = useState(0)
@@ -23,7 +23,7 @@ export default function Quiz() {
   const [selectedNote, setSelectedNote] = useState('')
 
   const startQuiz = async () => {
-    if (!geminiApiKey) {
+    if (!aiAvailable()) {
       setQuestions(DEMO_QUIZ)
       setPhase('quiz')
       setCurrent(0); setAnswers([]); setSelected(null)
@@ -33,7 +33,7 @@ export default function Quiz() {
     try {
       const note = (notes || []).find(n => n.id === selectedNote)
       const content = note?.content || 'General knowledge about studying and learning.'
-      const text = await callGeminiClient(
+      const text = await generateAI(
         `Generate 5 multiple choice questions from this content. Return ONLY a JSON array, no markdown: [{"q":"...","opts":["a","b","c","d"],"ans":0}]\n\n${content}`
       ) || ''
       const match = text.match(/\[[\s\S]*\]/)
@@ -147,7 +147,7 @@ export default function Quiz() {
         subtitle="Test yourself with AI-generated questions"
       />
       <Card style={{ padding: 28 }}>
-        {!geminiApiKey && (
+        {!aiAvailable() && (
           <div style={{
             display: 'flex', gap: 10, alignItems: 'flex-start',
             background: tint(C.orange, 0.08), border: `1px solid ${tint(C.orange, 0.3)}`,
@@ -155,11 +155,21 @@ export default function Quiz() {
           }}>
             <AlertTriangle size={15} color={C.orange} style={{ flexShrink: 0, marginTop: 2 }} />
             <p style={{ fontSize: 13, color: C.orange, lineHeight: 1.5 }}>
-              No Gemini API key — a sample quiz will be shown. Add your free key in <strong>Settings</strong> for AI quizzes from your own notes.
+              This browser can't run on-device AI (needs WebGPU) — a sample quiz will be shown. Add a free Gemini key in <strong>Settings</strong>, or use a WebGPU browser like Chrome, for AI quizzes from your own notes.
             </p>
           </div>
         )}
-        {geminiApiKey && (notes || []).length > 0 && (
+        {aiAvailable() && !hasClientKey() && (
+          <div style={{
+            display: 'flex', gap: 10, alignItems: 'flex-start',
+            background: tint(C.blue, 0.06), border: `1px solid ${tint(C.blue, 0.25)}`,
+            borderRadius: 12, padding: '10px 14px', marginBottom: 20, fontSize: 12, color: C.blue,
+          }}>
+            <Sparkles size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+            Using free on-device AI ({aiModeLabel()}) — first run downloads a small model, then works fully offline.
+          </div>
+        )}
+        {aiAvailable() && (notes || []).length > 0 && (
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: 'block', fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Generate from note (optional)</label>
             <select value={selectedNote} onChange={e => setSelectedNote(e.target.value)} style={inputStyle}>

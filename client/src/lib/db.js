@@ -212,6 +212,62 @@ export const loadStudyPlans = guard(async (userId) => {
   })) || []
 })
 
+// ── Profiles / Leaderboard ──────────────────────────────────────
+// A public, read-anyone / write-self "profiles" row per user backs the real
+// leaderboard: your XP/level/streak, a permanent share code, and the list of
+// friend user ids you've added (by their code). Fully a no-op — and the
+// Leaderboard page falls back to a local demo board — when Supabase isn't
+// configured.
+
+function genShareCode() {
+  return Math.random().toString(36).slice(2, 6).toUpperCase()
+}
+
+// Ensures a profile row exists for this user and returns it (creating one
+// with a fresh share code on first call).
+export const ensureProfile = guard(async (userId, name) => {
+  const { data: existing } = await supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle()
+  if (existing) return existing
+  const row = { user_id: userId, name: name || 'Student', share_code: genShareCode(), xp: 0, level: 1, streak: 0, friend_ids: [] }
+  const { data, error } = await supabase.from('profiles').insert(row).select().maybeSingle()
+  if (error) throw error
+  return data
+})
+
+export const updateProfileStats = guard(async (userId, { xp, level, streak, name }) => {
+  const patch = { updated_at: new Date().toISOString() }
+  if (xp !== undefined) patch.xp = xp
+  if (level !== undefined) patch.level = level
+  if (streak !== undefined) patch.streak = streak
+  if (name) patch.name = name
+  const { error } = await supabase.from('profiles').update(patch).eq('user_id', userId)
+  if (error) throw error
+})
+
+// Looks up a share code, adds that user to my friend list. Returns the
+// friend's profile, or null if the code doesn't exist / is my own.
+export const addFriendByCode = guard(async (userId, code) => {
+  const { data: friend } = await supabase.from('profiles').select('*').eq('share_code', code.toUpperCase().trim()).maybeSingle()
+  if (!friend || friend.user_id === userId) return null
+  const { data: mine } = await supabase.from('profiles').select('friend_ids').eq('user_id', userId).maybeSingle()
+  const friendIds = Array.from(new Set([...(mine?.friend_ids || []), friend.user_id]))
+  const { error } = await supabase.from('profiles').update({ friend_ids: friendIds }).eq('user_id', userId)
+  if (error) throw error
+  return friend
+})
+
+// My profile plus every friend's profile — everything the leaderboard needs.
+export const loadLeaderboard = guard(async (userId) => {
+  const { data: mine } = await supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle()
+  const friendIds = mine?.friend_ids || []
+  let friends = []
+  if (friendIds.length > 0) {
+    const { data } = await supabase.from('profiles').select('*').in('user_id', friendIds)
+    friends = data || []
+  }
+  return { mine, friends }
+})
+
 // ── Bulk load all user data (on login) ────────────────────────
 
 export const loadAllUserData = async (userId) => {

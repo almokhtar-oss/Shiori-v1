@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { BookOpen, Sparkles, Trash2, AlertTriangle } from 'lucide-react'
-import { useUIStore, useStudyPlansStore } from '../stores'
+import { useStudyPlansStore } from '../stores'
 import { C, fonts, tint, inputStyle, btnPrimary, btnGhost } from '../utils/theme'
 import { PageHeader, Card, SectionTitle, Empty } from '../components/ui'
-import { callGeminiClient } from '../utils/gemini'
+import { generateAI, aiAvailable, aiModeLabel } from '../utils/ai'
+import { hasClientKey } from '../utils/gemini'
 
 const DEMO_PLAN = {
   subject: 'Biology Final',
@@ -16,7 +17,6 @@ const DEMO_PLAN = {
 }
 
 export default function StudyPlans() {
-  const { geminiApiKey } = useUIStore()
   const { plans, addStudyPlan, deleteStudyPlan } = useStudyPlansStore()
   const [form, setForm] = useState({ subject: '', examDate: '' })
   const [loading, setLoading] = useState(false)
@@ -25,7 +25,7 @@ export default function StudyPlans() {
   const generate = async () => {
     if (!form.subject.trim()) return
     setLoading(true)
-    if (!geminiApiKey) {
+    if (!aiAvailable()) {
       setTimeout(() => {
         const plan = { ...DEMO_PLAN, subject: form.subject, examDate: form.examDate, id: Date.now().toString() }
         const id = addStudyPlan(plan)
@@ -36,7 +36,7 @@ export default function StudyPlans() {
       return
     }
     try {
-      const text = await callGeminiClient(
+      const text = await generateAI(
         `Create a 4-week study plan for "${form.subject}" with exam on ${form.examDate || 'TBD'}. Return ONLY JSON, no markdown: {"subject":"...","weeks":[{"week":1,"topic":"...","tasks":["a","b","c"]}]}`
       ) || ''
       const match = text.match(/\{[\s\S]*\}/)
@@ -68,14 +68,24 @@ export default function StudyPlans() {
       {/* Generator */}
       <Card style={{ padding: 24, marginBottom: 24 }}>
         <SectionTitle icon={Sparkles} color={C.purple}>Generate AI Study Plan</SectionTitle>
-        {!geminiApiKey && (
+        {!aiAvailable() && (
           <div style={{
             display: 'flex', gap: 10, alignItems: 'flex-start',
             background: tint(C.orange, 0.08), border: `1px solid ${tint(C.orange, 0.3)}`,
             borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: C.orange,
           }}>
             <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-            No Gemini key — a sample plan will be generated. Add your free key in Settings for AI plans.
+            This browser can't run on-device AI (needs WebGPU) — a sample plan will be generated. Add a free Gemini key in Settings, or use a WebGPU browser like Chrome.
+          </div>
+        )}
+        {aiAvailable() && !hasClientKey() && (
+          <div style={{
+            display: 'flex', gap: 10, alignItems: 'flex-start',
+            background: tint(C.blue, 0.06), border: `1px solid ${tint(C.blue, 0.25)}`,
+            borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: C.blue,
+          }}>
+            <Sparkles size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+            Using free on-device AI ({aiModeLabel()}) — first run downloads a small model, then works fully offline.
           </div>
         )}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

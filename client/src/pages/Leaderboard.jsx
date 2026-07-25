@@ -1,8 +1,10 @@
-import { useState } from 'react'
-import { Trophy, Flame, Copy, Check, Users } from 'lucide-react'
-import { useAuthStore, useXPStore } from '../stores'
-import { C, fonts, tint, btnGhost } from '../utils/theme'
+import { useState, useEffect, useCallback } from 'react'
+import { Trophy, Flame, Copy, Check, Users, UserPlus, Loader2 } from 'lucide-react'
+import { useAuthStore, useXPStore, useUIStore, usePomodoroStore, calcStreak } from '../stores'
+import { C, fonts, tint, btnGhost, btnPrimary, inputStyle } from '../utils/theme'
 import { PageHeader, Card, SectionTitle } from '../components/ui'
+import { isSupabaseConfigured } from '../lib/supabase'
+import { ensureProfile, updateProfileStats, addFriendByCode, loadLeaderboard } from '../lib/db'
 
 const MOCK_BOARD = [
   { rank: 1, name: 'Alex Kim', xp: 4200, level: 12, streak: 21, avatar: 'A' },
@@ -16,23 +18,75 @@ const RANK_EMOJI = { 1: '🥇', 2: '🥈', 3: '🥉' }
 
 export default function Leaderboard() {
   const { user } = useAuthStore()
-  const xpStore = useXPStore?.()
-  const myXP = xpStore?.xp || 0
-  const myLevel = xpStore?.level || 1
-  const myStreak = xpStore?.streak || 0
-  const [shareCode] = useState(() => Math.random().toString(36).slice(2, 6).toUpperCase())
+  const { xp: myXP, getProgress } = useXPStore()
+  const { addToast } = useUIStore()
+  const { dailyFocusLog } = usePomodoroStore()
+  const myLevel = getProgress().cur.level
+  const myStreak = calcStreak(dailyFocusLog || {})
   const [copied, setCopied] = useState(false)
+  const [friendCode, setFriendCode] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [realBoard, setRealBoard] = useState(null) // null = not loaded / unavailable
+  const [shareCode, setShareCode] = useState(null)
 
   const myName = user?.name || user?.firstName || 'You'
   const myInitial = myName[0]?.toUpperCase() || 'Y'
+  const live = isSupabaseConfigured() && !user?.isDemo && !!user?.id
 
-  const board = [...MOCK_BOARD, { rank: 6, name: myName + ' (You)', xp: myXP, level: myLevel, streak: myStreak, avatar: myInitial, isMe: true }]
-    .sort((a, b) => b.xp - a.xp)
-    .map((e, i) => ({ ...e, rank: i + 1 }))
+  const refreshBoard = useCallback(async () => {
+    if (!live) return
+    await updateProfileStats(user.id, { xp: myXP, level: myLevel, streak: myStreak, name: myName })
+    const board = await loadLeaderboard(user.id)
+    if (board?.mine) {
+      setShareCode(board.mine.share_code)
+      setRealBoard([board.mine, ...board.friends])
+    }
+  }, [live, user?.id, myXP, myLevel, myStreak, myName])
+
+  useEffect(() => {
+    if (!live) return
+    let cancelled = false
+    ;(async () => {
+      const profile = await ensureProfile(user.id, myName)
+      if (cancelled || !profile) return
+      await refreshBoard()
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, user?.id])
+
+  const handleAddFriend = async () => {
+    if (!friendCode.trim() || !live) return
+    setAdding(true)
+    const friend = await addFriendByCode(user.id, friendCode.trim())
+    setAdding(false)
+    if (friend) {
+      addToast({ type: 'success', message: `Added ${friend.name} to your leaderboard!` })
+      setFriendCode('')
+      refreshBoard()
+    } else {
+      addToast({ type: 'error', message: 'No student found with that code' })
+    }
+  }
+
+  const board = live && realBoard
+    ? realBoard
+        .map(p => ({
+          rank: 0, name: p.user_id === user.id ? `${p.name} (You)` : p.name,
+          xp: p.xp || 0, level: p.level || 1, streak: p.streak || 0,
+          avatar: (p.name || '?')[0].toUpperCase(), isMe: p.user_id === user.id,
+        }))
+        .sort((a, b) => b.xp - a.xp)
+        .map((e, i) => ({ ...e, rank: i + 1 }))
+    : [...MOCK_BOARD, { rank: 6, name: myName + ' (You)', xp: myXP, level: myLevel, streak: myStreak, avatar: myInitial, isMe: true }]
+        .sort((a, b) => b.xp - a.xp)
+        .map((e, i) => ({ ...e, rank: i + 1 }))
 
   const myEntry = board.find(e => e.isMe)
+  const displayCode = shareCode || '····'
 
   const copyCode = () => {
+    if (!shareCode) return
     navigator.clipboard?.writeText(shareCode)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -110,22 +164,50 @@ export default function Leaderboard() {
       </Card>
 
       {/* Share code */}
-      <Card style={{ padding: '20px 24px' }}>
+      <Card style={{ padding: '20px 24px', marginBottom: live ? 20 : 0 }}>
         <SectionTitle icon={Users} color={C.purple}>Invite Friends</SectionTitle>
-        <p style={{ fontSize: 13, color: C.textMuted, marginBottom: 12 }}>Share your code to compete together:</p>
+        <p style={{ fontSize: 13, color: C.textMuted, marginBottom: 12 }}>
+          {live ? 'Share your code so friends can add you to their board:' : 'Share your code to compete together:'}
+        </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{
             fontFamily: fonts.heading, fontSize: 24, fontWeight: 700, color: C.blue,
             letterSpacing: '0.18em', background: C.bg, border: `1px solid ${C.border}`,
             borderRadius: 10, padding: '8px 18px',
           }}>
-            {shareCode}
+            {displayCode}
           </div>
-          <button onClick={copyCode} style={{ ...btnGhost, color: copied ? C.green : C.textMuted }}>
+          <button onClick={copyCode} disabled={!shareCode} style={{ ...btnGhost, color: copied ? C.green : C.textMuted, opacity: shareCode ? 1 : 0.5 }}>
             {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
           </button>
         </div>
+        {!live && (
+          <p style={{ fontSize: 12, color: C.textFaint, marginTop: 12 }}>
+            {user?.isDemo ? 'Sign in with a real account to build a live leaderboard with friends.' : 'Connect Supabase (see SETUP.md) to unlock a real, live-synced leaderboard.'}
+          </p>
+        )}
       </Card>
+
+      {/* Add friend by code */}
+      {live && (
+        <Card style={{ padding: '20px 24px' }}>
+          <SectionTitle icon={UserPlus} color={C.blue}>Add a Friend</SectionTitle>
+          <p style={{ fontSize: 13, color: C.textMuted, marginBottom: 12 }}>Enter a friend's code to add them to your board:</p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <input
+              value={friendCode}
+              onChange={e => setFriendCode(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === 'Enter' && handleAddFriend()}
+              placeholder="e.g. AB12"
+              maxLength={8}
+              style={{ ...inputStyle, flex: 1, minWidth: 140, width: 'auto', letterSpacing: '0.12em', fontFamily: fonts.heading }}
+            />
+            <button onClick={handleAddFriend} disabled={adding || !friendCode.trim()} style={{ ...btnPrimary, opacity: adding || !friendCode.trim() ? 0.6 : 1 }}>
+              {adding ? <Loader2 size={14} className="spin" /> : <UserPlus size={14} />} {adding ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }
